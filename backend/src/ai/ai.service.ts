@@ -110,7 +110,11 @@ export class AiService {
         },
         {
           role: 'user',
-          content: `Given this goal, reply strictly as JSON like {"tasks":[{"title":"task title","isCompleted":false}]} with 3-7 tasks. Goal: ${prompt}`,
+          content: `
+            Given this goal, reply strictly as JSON like {"tasks":[{"title":"task title","isCompleted":false}]} with 1-10 tasks.
+            "isCompleted" is always false, titles are always in PT-BR, if the goal doesn't make it sense you can return a single task 
+            with the title: "Não foi possível criar tarefas com essa instrução".
+            Goal: ${prompt}`,
         },
       ],
       response_format: { type: 'json_object' },
@@ -140,39 +144,44 @@ export class AiService {
   async generateTasksWithHuggingFace(prompt: string, apiKey: string): Promise<AiTaskSuggestionResponse> {
     this.validateInput(apiKey, prompt);
 
-    const url = 'https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct';
-    const input = `Extract a short checklist of tasks as JSON like {"tasks":[{"title":"task title","isCompleted":false}]}. Goal: ${prompt}`;
+    const input = `
+      Given this goal, reply strictly as JSON like {"tasks":[{"title":"task title","isCompleted":false}]} with 1-10 tasks.
+      "isCompleted" is always false, titles are always in PT-BR, if the goal doesn't make it sense you can return a single task 
+      with the title: "Não foi possível criar tarefas com essa instrução".
+      Goal: ${prompt}`;
 
     try {
-      const response: AxiosResponse<any> = await firstValueFrom(
-        this.http.post(
-          url,
-          {
-            inputs: input,
-            parameters: {
-              max_new_tokens: 256,
-              return_full_text: false
-            }
+      const response = await fetch(
+        "https://router.huggingface.co/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
           },
-          {
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            timeout: 25000,
-          },
-        ),
+          body: JSON.stringify({
+            model: "deepseek-ai/DeepSeek-V3-0324",
+            messages: [
+              {
+                role: "user",
+                content: input,
+              },
+            ],
+          }),
+        }
       );
 
-      let text = '';
-      if (Array.isArray(response.data)) {
-        text = response.data?.[0]?.generated_text || '';
-      } else {
-        text = response.data?.generated_text || '';
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
+      const data = await response.json();
+
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      
       if (!text) {
-        throw new Error('No generated text in response');
+        throw new Error("No generated text in response");
       }
 
       return this.parseAiResponse(text);
