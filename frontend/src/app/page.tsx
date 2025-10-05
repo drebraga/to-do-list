@@ -1,5 +1,6 @@
 "use client";
 import CustomCheckbox from "@/components/checkbox";
+import LoadingIcon from "@/components/loadingIcon";
 import TrashIcon from "@/components/trashIcon";
 import { useEffect, useMemo, useState } from "react";
 
@@ -14,6 +15,7 @@ export default function Home() {
   const [aiProvider, setAiProvider] = useState<"openrouter" | "huggingface">("openrouter");
   const [aiKey, setAiKey] = useState("");
   const [loading, setLoading] = useState(false);
+  const isGenerateDisabled = loading || !aiKey.trim() || !aiPrompt.trim();
 
   async function loadTasks() {
     const res = await fetch(`${apiBase}/tasks`);
@@ -56,22 +58,48 @@ export default function Home() {
   async function generateTasksFromAI(e: React.FormEvent) {
     e.preventDefault();
     if (!aiKey || !aiPrompt.trim()) return;
+
     setLoading(true);
     try {
       const res = await fetch(`${apiBase}/ai/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: aiProvider, apiKey: aiKey, prompt: aiPrompt }),
+        body: JSON.stringify({
+          provider: aiProvider,
+          apiKey: aiKey,
+          prompt: aiPrompt,
+        }),
       });
-      const data = await res.json();
+
+      const data = await res.json().catch(() => ({})); // caso não venha JSON
+
+      if (!res.ok) {
+        if (res.status === 401 && data?.message?.includes("Invalid API key")) {
+          alert("Erro ao gerar tarefas: API key inválida.");
+        }
+        else if (res.status === 400 && data?.message?.includes("Rate limit")) {
+          alert("Erro: limite de uso da API atingido. Tente novamente mais tarde.");
+        }
+        else if (res.status === 400 && data?.message?.includes("timeout")) {
+          alert("Erro: tempo de resposta da API excedido.");
+        }
+        else {
+          alert(data?.message || "Erro desconhecido ao gerar tarefas.");
+        }
+        return;
+      }
+
       if (Array.isArray(data?.tasks)) {
         setTasks((prev) => [...data.tasks, ...prev]);
       }
       setAiPrompt("");
+    } catch (error) {
+      console.error("Erro ao gerar tarefas:", error);
     } finally {
       setLoading(false);
     }
   }
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 transition-colors duration-200">
@@ -138,9 +166,10 @@ export default function Home() {
               type="password"
             />
             <button
-              disabled={loading}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded transition-colors"
+              disabled={isGenerateDisabled}
+              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded transition-colors flex items-center justify-center gap-2"
             >
+              {loading && <LoadingIcon className="h-4 w-4 text-white" />}
               {loading ? "Gerando..." : "Gerar"}
             </button>
           </div>
